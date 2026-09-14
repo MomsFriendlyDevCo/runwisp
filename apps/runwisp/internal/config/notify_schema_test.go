@@ -29,7 +29,7 @@ bot_token = "tok"
 chat_id = "-1001"
 
 [[route]]
-match = { kinds = ["run.failed"], task = "backup-*" }
+match = { kinds = ["failed"], task = "backup-*" }
 notifiers = ["ops", "oncall", "inapp"]
 
 [notify]
@@ -41,7 +41,7 @@ cron = "0 3 * * *"
 max_concurrent = 1
 on_overlap = "queue"
 run = "backup.sh"
-notify_on_failure = ["ops"]
+notify = ["ops"]
 `
 	cfg, err := decode([]byte(src), "")
 	require.NoError(t, err)
@@ -54,7 +54,7 @@ notify_on_failure = ["ops"]
 
 	require.Len(t, cfg.Notify.Routes, 3, "explicit route + per-task sugar + default inapp catch-all")
 	explicit := cfg.Notify.Routes[0]
-	assert.Equal(t, []string{"run.failed"}, explicit.Kinds)
+	assert.Equal(t, []string{"failed"}, explicit.Kinds)
 	assert.Equal(t, "backup-*", explicit.TaskGlob)
 	assert.Equal(t, []string{"ops", "oncall", "inapp"}, explicit.NotifierID)
 
@@ -150,7 +150,7 @@ webhook_url = "https://example/x"
 func TestValidate_RejectsRouteWithUnknownNotifier(t *testing.T) {
 	src := `
 [[route]]
-match = { kinds = ["run.failed"] }
+match = { kinds = ["failed"] }
 notifiers = ["does-not-exist"]
 `
 	cfg, err := decode([]byte(src), "")
@@ -231,7 +231,7 @@ cron              = "0 4 * * *"
 max_concurrent    = 1
 on_overlap        = "queue"
 run               = "audit.sh"
-notify_on_failure = ["slack:#ops"]
+notify = ["slack:#ops"]
 `
 	cfg, err := decode([]byte(src), "")
 	require.NoError(t, err)
@@ -269,8 +269,11 @@ cron              = "0 9 * * 1"
 max_concurrent    = 1
 on_overlap        = "queue"
 run               = "deploy.sh"
-notify_on_failure = ["tg:-2002"]
-notify_on_success = ["tg:-3003"]
+notify = ["tg:-2002"]
+
+[[route]]
+match     = { task = "deploy", kinds = ["succeeded"] }
+notifiers = ["tg:-3003"]
 `
 	cfg, err := decode([]byte(src), "")
 	require.NoError(t, err)
@@ -296,21 +299,21 @@ cron              = "* * * * *"
 max_concurrent    = 1
 on_overlap        = "queue"
 run               = "x"
-notify_on_failure = ["slack:#ops"]
+notify = ["slack:#ops"]
 
 [tasks.b]
 cron              = "* * * * *"
 max_concurrent    = 1
 on_overlap        = "queue"
 run               = "y"
-notify_on_failure = ["slack:#ops"]
+notify = ["slack:#ops"]
 
 [tasks.c]
 cron              = "* * * * *"
 max_concurrent    = 1
 on_overlap        = "queue"
 run               = "z"
-notify_on_failure = ["slack:#ops", "slack:#fyi"]
+notify = ["slack:#ops", "slack:#fyi"]
 `
 	cfg, err := decode([]byte(src), "")
 	require.NoError(t, err)
@@ -332,7 +335,7 @@ type            = "slack"
 webhook_url     = "https://example/hook"
 
 [[route]]
-match  = { kinds = ["run.failed"], task = "backup-*" }
+match  = { kinds = ["failed"], task = "backup-*" }
 notifiers = ["slack:#ops"]
 `
 	cfg, err := decode([]byte(src), "")
@@ -356,7 +359,7 @@ cron              = "* * * * *"
 max_concurrent    = 1
 on_overlap        = "queue"
 run               = "x"
-notify_on_failure = ["slack:#ops"]
+notify = ["slack:#ops"]
 `
 	_, err := decode([]byte(src), "")
 	require.Error(t, err)
@@ -370,7 +373,7 @@ cron              = "* * * * *"
 max_concurrent    = 1
 on_overlap        = "queue"
 run               = "x"
-notify_on_failure = ["inapp:foo"]
+notify = ["inapp:foo"]
 `
 	_, err := decode([]byte(src), "")
 	require.Error(t, err)
@@ -388,7 +391,7 @@ cron              = "* * * * *"
 max_concurrent    = 1
 on_overlap        = "queue"
 run               = "x"
-notify_on_failure = ["slack:"]
+notify = ["slack:"]
 `
 	_, err := decode([]byte(src), "")
 	require.Error(t, err)
@@ -406,7 +409,7 @@ cron              = "* * * * *"
 max_concurrent    = 1
 on_overlap        = "queue"
 run               = "x"
-notify_on_failure = ["slack:ops"]
+notify = ["slack:ops"]
 `
 	_, err := decode([]byte(src), "")
 	require.Error(t, err)
@@ -438,7 +441,7 @@ cron = "0 3 * * *"
 max_concurrent = 1
 on_overlap = "queue"
 run = "backup.sh"
-notify_on_failure = ["ops"]
+notify = ["ops"]
 `
 	cfg, err := decode([]byte(src), "")
 	require.NoError(t, err)
@@ -643,7 +646,7 @@ webhook_url = "https://example/x"
 run = "svc-process"
 on_overlap = "queue"
 instances = 1
-notify_on_failure = ["ops"]
+notify = ["ops"]
 `
 	cfg, err := decode([]byte(src), "")
 	require.NoError(t, err)
@@ -656,37 +659,27 @@ notify_on_failure = ["ops"]
 			break
 		}
 	}
-	assert.True(t, found, "service task with notify_on_failure must produce a route")
+	assert.True(t, found, "service task with notify must produce a route")
 }
 
-func TestValidate_RouteWithEmptySeverity(t *testing.T) {
-	src := schedulerTZHeader + `
-[[route]]
-match = { kinds = ["run.failed"] }
-notifiers = ["inapp"]
-`
-	cfg, err := decode([]byte(src), "")
-	require.NoError(t, err)
-	require.NoError(t, Validate(cfg))
-}
-
-func TestValidate_RouteWithBadSeverity(t *testing.T) {
+// TestValidate_RouteSeverityRejected pins that the dropped match.severity axis
+// is no longer a recognized key: it must be rejected at strict decode, not
+// silently accepted as dead config.
+func TestValidate_RouteSeverityRejected(t *testing.T) {
 	src := `
 [[route]]
-match = { kinds = ["run.failed"], severity = "unknown-sev" }
+match = { kinds = ["failed"], severity = "error" }
 notifiers = ["inapp"]
 `
-	cfg, err := decode([]byte(src), "")
-	require.NoError(t, err)
-	err = Validate(cfg)
+	_, err := decode([]byte(src), "")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "match.severity")
+	assert.Contains(t, err.Error(), "unknown key")
 }
 
 func TestValidate_RouteWithInvalidGlob(t *testing.T) {
 	src := `
 [[route]]
-match = { kinds = ["run.failed"], task = "[invalid" }
+match = { kinds = ["failed"], task = "[invalid" }
 notifiers = ["inapp"]
 `
 	cfg, err := decode([]byte(src), "")
@@ -874,7 +867,7 @@ cron              = "0 3 * * *"
 max_concurrent    = 1
 on_overlap        = "queue"
 run               = "backup.sh"
-notify_on_failure = ["email-ops:alerts@example.com"]
+notify = ["email-ops:alerts@example.com"]
 `
 	cfg, err := decode([]byte(src), "")
 	require.NoError(t, err)
@@ -907,7 +900,7 @@ cron              = "* * * * *"
 max_concurrent    = 1
 on_overlap        = "queue"
 run               = "x"
-notify_on_failure = ["email-ops:bad@@@"]
+notify = ["email-ops:bad@@@"]
 `
 	_, err := decode([]byte(src), "")
 	require.Error(t, err)
@@ -977,7 +970,7 @@ url  = "https://example.com/hook"
 [tasks.foo]
 cron              = "* * * * *"
 run               = "true"
-notify_on_failure = ["my-hook:override"]
+notify = ["my-hook:override"]
 `
 	_, err := decode([]byte(src), "")
 	require.Error(t, err)
@@ -1031,7 +1024,7 @@ webhook_url = "https://discord.com/api/webhooks/123/token"
 [tasks.foo]
 cron              = "* * * * *"
 run               = "true"
-notify_on_failure = ["discord-ops:override"]
+notify = ["discord-ops:override"]
 `
 	_, err := decode([]byte(src), "")
 	require.Error(t, err)
@@ -1041,7 +1034,7 @@ notify_on_failure = ["discord-ops:override"]
 func TestValidate_RouteEmptyNotifyList(t *testing.T) {
 	src := `
 [[route]]
-match = { kinds = ["run.failed"] }
+match = { kinds = ["failed"] }
 notifiers = []
 `
 	cfg, err := decode([]byte(src), "")

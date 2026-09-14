@@ -58,7 +58,7 @@ type        = "slack"
 webhook_url = "%s"
 
 [[route]]
-match  = { kinds = ["run.failed", "run.timeout", "run.crashed"] }
+match  = { kinds = ["failed", "timeout", "crashed"] }
 notifiers = ["ops", "inapp"]
 `, webhook.URL))
 
@@ -149,7 +149,7 @@ url     = "%s"
 headers = { Authorization = "Bearer e2e-test-token" }
 
 [[route]]
-match  = { kinds = ["run.failed", "run.timeout", "run.crashed"] }
+match  = { kinds = ["failed", "timeout", "crashed"] }
 notifiers = ["hook"]
 `, hook.URL))
 
@@ -221,7 +221,7 @@ type        = "slack"
 webhook_url = "%s"
 
 [[route]]
-match  = { kinds = ["run.failed", "run.timeout", "run.crashed"] }
+match  = { kinds = ["failed", "timeout", "crashed"] }
 notifiers = ["ops"]
 `, webhook.URL))
 
@@ -265,7 +265,7 @@ type        = "slack"
 webhook_url = "%s"
 
 [[route]]
-match  = { kinds = ["run.failed", "run.timeout", "run.crashed"] }
+match  = { kinds = ["failed", "timeout", "crashed"] }
 notifiers = ["broken", "inapp"]
 `, webhook.URL))
 
@@ -297,7 +297,7 @@ notifiers = ["broken", "inapp"]
 
 // TestNotificationsZeroConfigInappFires verifies the zero-setup default: a
 // TOML with no [notify] section, no [notifiers.*] blocks, no
-// [[route]] rules, and no per-task notify_on_failure still
+// [[route]] rules, and no per-task notify still
 // produces an in-app notification when a run fails. The bell in the Web UI
 // and the footer line in the TUI must light up out of the box.
 func TestNotificationsZeroConfigInappFires(t *testing.T) {
@@ -358,7 +358,7 @@ from = "RunWisp <runwisp@example.test>"
 to   = ["alerts@example.test"]
 
 [[route]]
-match  = { kinds = ["run.failed", "run.timeout", "run.crashed"] }
+match  = { kinds = ["failed", "timeout", "crashed"] }
 notifiers = ["email-ops"]
 `, host, portStr))
 

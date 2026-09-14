@@ -16,42 +16,26 @@ func MatchAll() Predicate { return func(*Event) bool { return true } }
 
 // MatchFailure succeeds when the event is classified as a failure. It is the
 // single predicate behind the built-in failure route (catch-all and per-task
-// notify_on_failure), replacing a hardcoded Kind list so per-task `failures`
+// notify), replacing a hardcoded Kind list so per-task `failures`
 // promotions/demotions re-route without touching notify config.
 func MatchFailure() Predicate { return func(ev *Event) bool { return ev.IsFailure } }
 
-// MatchKind succeeds when the event's kind is in the allowed set.
-func MatchKind(kinds ...Kind) Predicate {
-	if len(kinds) == 0 {
+// MatchOutcomes succeeds when the event's Outcome() token is in the allowed
+// set. The token vocabulary is the same one `failures` uses — bare end-reason
+// names (`failed`, `timeout`, `log_overflow`, …) — plus the non-run event
+// tokens (`service.fatal`, `log.disk_pressure`, `started`), so a `[[route]]`
+// and a task's `failures` policy speak one language.
+func MatchOutcomes(tokens ...string) Predicate {
+	if len(tokens) == 0 {
 		return MatchAll()
 	}
-	set := make(map[Kind]struct{}, len(kinds))
-	for _, k := range kinds {
-		set[k] = struct{}{}
+	set := make(map[string]struct{}, len(tokens))
+	for _, t := range tokens {
+		set[t] = struct{}{}
 	}
 	return func(ev *Event) bool {
-		_, ok := set[ev.Kind]
+		_, ok := set[ev.Outcome()]
 		return ok
-	}
-}
-
-// severityRank orders severities for MatchSeverity. Hoisted to package scope
-// so the closure doesn't allocate the map on every call.
-var severityRank = map[Severity]int{SevInfo: 0, SevWarn: 1, SevError: 2}
-
-// MatchSeverity succeeds when the event severity is at least the threshold.
-// Order: info < warn < error.
-func MatchSeverity(min Severity) Predicate {
-	threshold, ok := severityRank[min]
-	if !ok {
-		return MatchAll()
-	}
-	return func(ev *Event) bool {
-		got, ok := severityRank[ev.Severity]
-		if !ok {
-			return false
-		}
-		return got >= threshold
 	}
 }
 

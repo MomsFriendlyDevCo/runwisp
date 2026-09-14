@@ -36,8 +36,7 @@ var ComposeAutoDiscoveryFilenames = []string{
 // time with a helpful rename hint.
 var composeReservedKeys = map[string]struct{}{
 	"file":         {},
-	"include":      {},
-	"exclude":      {},
+	"services":     {},
 	"import":       {},
 	"group":        {},
 	"project_name": {},
@@ -128,13 +127,11 @@ func expandComposeBlocks(cfg *Config, dirs entrySources) error {
 	return appendComposeNotify(&cfg.Notify, notify)
 }
 
-// composeNotifySugar carries one imported service's notify_on_failure /
-// notify_on_success selections, keyed by the generated task name, from
-// expansion to the notify-route desugaring step.
+// composeNotifySugar carries one imported service's `notify` selections, keyed
+// by the generated task name, from expansion to the notify-route desugaring step.
 type composeNotifySugar struct {
-	taskName  string
-	onFailure []string
-	onSuccess []string
+	taskName string
+	notify   []string
 }
 
 // appendComposeNotify turns collected compose per-service notify sugar into
@@ -148,7 +145,7 @@ func appendComposeNotify(out *NotifyConfig, sugar []composeNotifySugar) error {
 	}
 	from := len(out.Routes)
 	for _, s := range sugar {
-		appendSynthRoutes(out, s.taskName, s.onFailure, s.onSuccess)
+		appendNotifyRoute(out, s.taskName, s.notify)
 	}
 	return expandInlineTokensFrom(out, from)
 }
@@ -157,9 +154,12 @@ func appendComposeNotify(out *NotifyConfig, sugar []composeNotifySugar) error {
 // [compose.<alias>] table. Sub-tables (per-service overrides) are separated
 // before decoding.
 type composeBlockWire struct {
-	File        string   `toml:"file,omitempty"`
-	Include     []string `toml:"include,omitempty"`
-	Exclude     []string `toml:"exclude,omitempty"`
+	File string `toml:"file,omitempty"`
+	// Services filters which compose services are imported. A bare (or "+"-prefixed)
+	// name is an allowlist entry ("import only these"); a "-"-prefixed name is a
+	// denylist entry ("import everything but these"). The two polarities are
+	// mutually exclusive within one block. Empty means "import every service".
+	Services    []string `toml:"services,omitempty"`
 	Import      string   `toml:"import,omitempty"`
 	Group       string   `toml:"group,omitempty"`
 	ProjectName string   `toml:"project_name,omitempty"`
@@ -176,7 +176,7 @@ type composeBlock struct {
 	composeBlockWire
 	Alias string
 
-	// Overrides keyed by compose-service name (post-include/post-exclude).
+	// Overrides keyed by compose-service name (post-`services` filtering).
 	Overrides map[string]*composeServiceOverrideWire
 
 	// Defaults is the [compose.<alias>.defaults] sub-table applied to every
@@ -227,8 +227,7 @@ type composeServiceOverrideWire struct {
 	Secrets     map[string]string `toml:"secrets,omitempty"`
 	SecretsFile string            `toml:"secrets_file,omitempty"`
 
-	NotifyOnFailure []string `toml:"notify_on_failure,omitempty"`
-	NotifyOnSuccess []string `toml:"notify_on_success,omitempty"`
+	Notify []string `toml:"notify,omitempty"`
 }
 
 func expandComposeAlias(alias string, raw map[string]any, baseDir string, existingNames map[string]struct{}) ([]model.Task, []composeNotifySugar, error) {
@@ -357,13 +356,9 @@ func applyComposeBlockDefaults(block *composeBlock, alias string) {
 	}
 }
 
-// validateComposeBlock rejects mutually-exclusive or out-of-range fields on a
-// defaulted block, and enforces the stack-mode restrictions (no overrides, no
-// include/exclude).
+// validateComposeBlock rejects out-of-range fields on a defaulted block, and
+// enforces the stack-mode restrictions (no overrides, no `services` filtering).
 func validateComposeBlock(block *composeBlock) error {
-	if len(block.Include) > 0 && len(block.Exclude) > 0 {
-		return fmt.Errorf("`include` and `exclude` are mutually exclusive")
-	}
 	if !slices.Contains(validComposeImport, block.Import) {
 		return fmt.Errorf("invalid import %q: must be one of %s", block.Import, strings.Join(validComposeImport, ", "))
 	}
@@ -377,8 +372,8 @@ func validateComposeBlock(block *composeBlock) error {
 		if len(block.Overrides) > 0 || block.Defaults != nil {
 			return fmt.Errorf("per-service overrides are not allowed in import=\"stack\"")
 		}
-		if len(block.Include) > 0 || len(block.Exclude) > 0 {
-			return fmt.Errorf("include/exclude are not allowed in import=\"stack\"")
+		if len(block.Services) > 0 {
+			return fmt.Errorf("`services` filtering is not allowed in import=\"stack\"")
 		}
 	}
 	return nil
@@ -465,22 +460,21 @@ func expandComposeServices(block *composeBlock, project *composespec.Project, ex
 	return tasks, notify, nil
 }
 
-// composeServiceNotify extracts a service override's notify_on_* selections
-// into notify sugar keyed by the generated task name. Reports ok=false when the
-// override is absent or declares neither list, so the caller adds no route.
+// composeServiceNotify extracts a service override's `notify` selection into
+// notify sugar keyed by the generated task name. Reports ok=false when the
+// override is absent or declares no notifiers, so the caller adds no route.
 func composeServiceNotify(w *composeServiceOverrideWire, taskName string) (composeNotifySugar, bool) {
-	if w == nil || (len(w.NotifyOnFailure) == 0 && len(w.NotifyOnSuccess) == 0) {
+	if w == nil || len(w.Notify) == 0 {
 		return composeNotifySugar{}, false
 	}
 	return composeNotifySugar{
-		taskName:  taskName,
-		onFailure: w.NotifyOnFailure,
-		onSuccess: w.NotifyOnSuccess,
+		taskName: taskName,
+		notify:   w.Notify,
 	}, true
 }
 
 // selectImportedComposeServices rejects service names colliding with a reserved
-// compose-block key, validates the include/exclude name sets against the
+// compose-block key, validates the `services` filter names against the
 // available services, and returns the post-filter set of services to import.
 func selectImportedComposeServices(block *composeBlock, available []string, availableSet map[string]struct{}) ([]string, error) {
 	for _, n := range available {
@@ -491,25 +485,61 @@ func selectImportedComposeServices(block *composeBlock, available []string, avai
 	if _, ok := availableSet[composeDefaultsKey]; ok {
 		return nil, fmt.Errorf("compose service %q collides with the reserved defaults table in [compose.%s]; rename the compose service", composeDefaultsKey, block.Alias)
 	}
-	if err := validateComposeNameSet(block.Include, availableSet, "include"); err != nil {
+	include, exclude, err := parseComposeServices(block.Services)
+	if err != nil {
 		return nil, err
 	}
-	if err := validateComposeNameSet(block.Exclude, availableSet, "exclude"); err != nil {
+	if err := validateComposeNameSet(include, availableSet, "services"); err != nil {
 		return nil, err
 	}
-	return selectComposeServices(available, block.Include, block.Exclude), nil
+	if err := validateComposeNameSet(exclude, availableSet, "services"); err != nil {
+		return nil, err
+	}
+	return selectComposeServices(available, include, exclude), nil
+}
+
+// parseComposeServices splits a [compose.<alias>] `services` list into allowlist
+// (bare or "+"-prefixed) and denylist ("-"-prefixed) name sets. The two
+// polarities are mutually exclusive: a single block either names the services to
+// keep or the services to drop, never both.
+func parseComposeServices(services []string) (include, exclude []string, err error) {
+	for _, raw := range services {
+		name := strings.TrimSpace(raw)
+		switch {
+		case strings.HasPrefix(name, "-"):
+			name = strings.TrimSpace(name[1:])
+			if name == "" {
+				return nil, nil, fmt.Errorf("services: %q has no service name after \"-\"", raw)
+			}
+			exclude = append(exclude, name)
+		case strings.HasPrefix(name, "+"):
+			name = strings.TrimSpace(name[1:])
+			if name == "" {
+				return nil, nil, fmt.Errorf("services: %q has no service name after \"+\"", raw)
+			}
+			include = append(include, name)
+		case name == "":
+			return nil, nil, fmt.Errorf("services: empty entry")
+		default:
+			include = append(include, name)
+		}
+	}
+	if len(include) > 0 && len(exclude) > 0 {
+		return nil, nil, fmt.Errorf("services: cannot mix kept (+) and dropped (-) entries in one block")
+	}
+	return include, exclude, nil
 }
 
 // validateComposeOverridesExist ensures every per-service override targets a
 // service that was actually imported, distinguishing "no such service" from
-// "filtered out by include/exclude".
+// "filtered out by `services`".
 func validateComposeOverridesExist(overrides map[string]*composeServiceOverrideWire, importedSet, availableSet map[string]struct{}) error {
 	for name := range overrides {
 		if _, ok := importedSet[name]; !ok {
 			if _, exists := availableSet[name]; !exists {
 				return fmt.Errorf("override for service %q does not exist in compose file", name)
 			}
-			return fmt.Errorf("override for service %q does not match any imported service (filtered out by include/exclude)", name)
+			return fmt.Errorf("override for service %q does not match any imported service (filtered out by `services`)", name)
 		}
 	}
 	return nil

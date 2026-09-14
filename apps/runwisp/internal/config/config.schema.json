@@ -163,7 +163,7 @@
         "keep_runs": { "type": "integer", "minimum": 0, "maximum": 1000000, "description": "Row-count retention; 0 keeps no completed runs." },
         "keep_for": { "$ref": "#/$defs/duration", "description": "Age retention; positive." },
         "healthy_after": { "$ref": "#/$defs/duration", "description": "Service uptime counted as healthy (services only). Default 60s." },
-        "restart_attempts": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Consecutive failures before giving up restarting — a service instance goes FATAL, a restarting task is recorded start_failed. Default 3." },
+        "restart_attempts": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Consecutive fast failures before a service instance goes FATAL. Default 3. Service-only." },
         "env": { "$ref": "#/$defs/envMap" },
         "env_file": { "type": "string", "description": "Dotenv file merged into every task; relative to runwisp.toml dir." },
         "secrets": { "$ref": "#/$defs/secretsMap" },
@@ -187,8 +187,6 @@
         "timeout": { "$ref": "#/$defs/duration", "description": "Per-attempt cap (inherits [defaults])." },
         "graceful_stop": { "$ref": "#/$defs/duration", "description": "Grace before SIGKILL on stop. Default 5s." },
         "stop_signal": { "$ref": "#/$defs/stopSignal" },
-        "restart": { "type": "string", "enum": ["never", "on_failure"], "description": "Restart policy (always is rejected on tasks — use [services.*])." },
-        "restart_attempts": { "type": "integer", "minimum": 0, "maximum": 100, "default": 3, "description": "Consecutive failures a restarting run tolerates before giving up (recorded as start_failed). Only meaningful with restart = on_failure." },
         "max_concurrent": { "type": "integer", "minimum": 1, "maximum": 1024, "default": 1, "description": "Concurrent run cap." },
         "max_queued": { "type": "integer", "minimum": 0, "maximum": 10000, "default": 100, "description": "Queued-run depth." },
         "on_overlap": { "$ref": "#/$defs/onOverlap", "default": "queue" },
@@ -213,8 +211,7 @@
         "env_file": { "type": "string" },
         "secrets": { "$ref": "#/$defs/secretsMap" },
         "secrets_file": { "type": "string" },
-        "notify_on_failure": { "type": "array", "items": { "type": "string" }, "description": "Route on any failure outcome (see failures); notifier ids, \"id:override\", or \"inapp\"." },
-        "notify_on_success": { "type": "array", "items": { "type": "string" }, "description": "Route on run.succeeded." },
+        "notify": { "type": "array", "items": { "type": "string" }, "description": "Notifier ids (or \"id:override\", or \"inapp\") to page when this unit's `failures` policy classifies a run as a failure. Non-failure outcomes (a success ping, a timeout-only escalation) use an explicit [[route]] instead." },
         "params": { "type": "array", "items": { "$ref": "#/$defs/param" }, "description": "Per-execution inputs ([tasks.*.params])." }
       }
     },
@@ -248,8 +245,7 @@
         "env_file": { "type": "string" },
         "secrets": { "$ref": "#/$defs/secretsMap" },
         "secrets_file": { "type": "string" },
-        "notify_on_failure": { "type": "array", "items": { "type": "string" } },
-        "notify_on_success": { "type": "array", "items": { "type": "string" } },
+        "notify": { "type": "array", "items": { "type": "string" } },
         "instances": { "type": "integer", "minimum": 1, "maximum": 64, "default": 1, "description": "Parallel instances." },
         "restart_delay": { "$ref": "#/$defs/duration", "description": "Delay before a restart. Default 1s." },
         "restart_backoff": { "$ref": "#/$defs/backoff", "default": "exponential" },
@@ -282,8 +278,7 @@
       "description": "One [compose.<alias>] block: reserved scalar keys plus per-service override sub-tables. The reserved [compose.<alias>.defaults] sub-table applies its override keys to every imported service (per-service tables win).",
       "properties": {
         "file": { "type": "string", "description": "Compose file path; auto-discovered when omitted." },
-        "include": { "type": "array", "items": { "type": "string" }, "description": "Services to import; mutually exclusive with exclude." },
-        "exclude": { "type": "array", "items": { "type": "string" }, "description": "Services to skip." },
+        "services": { "type": "array", "items": { "type": "string" }, "description": "Filter which compose services are imported: bare or \"+name\" keeps only those; \"-name\" drops those. The two polarities are mutually exclusive. Omit to import every service." },
         "import": { "type": "string", "enum": ["services", "stack"], "default": "services", "description": "How to import the compose file: one RunWisp service per compose service, or one task managing the whole project." },
         "group": { "type": "string" },
         "project_name": { "type": "string" },
@@ -325,8 +320,7 @@
         "env_file": { "type": "string" },
         "secrets": { "$ref": "#/$defs/secretsMap" },
         "secrets_file": { "type": "string" },
-        "notify_on_failure": { "type": "array", "items": { "type": "string" } },
-        "notify_on_success": { "type": "array", "items": { "type": "string" } }
+        "notify": { "type": "array", "items": { "type": "string" } }
       }
     },
     "notify": {
@@ -384,12 +378,13 @@
           "properties": {
             "kinds": {
               "type": "array",
+              "description": "Match on fine-grained outcomes — the same vocabulary as [tasks.*] failures.",
               "items": {
                 "type": "string",
-                "enum": ["run.started", "run.succeeded", "run.failed", "run.timeout", "run.stopped", "run.crashed", "run.missed", "service.fatal", "log.disk_pressure"]
+                "enum": ["started", "succeeded", "failed", "timeout", "crashed", "log_overflow", "queue_full", "stopped", "daemon_stopped", "missed", "service.fatal", "log.disk_pressure"]
               }
             },
-            "severity": { "type": "string", "enum": ["info", "warn", "error"] },
+            "failure": { "type": "boolean", "description": "Match any run classified as a failure (per [tasks.*] failures)." },
             "task": { "type": "string", "description": "Glob over task name." }
           }
         },

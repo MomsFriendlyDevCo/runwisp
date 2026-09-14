@@ -75,8 +75,11 @@ type taskServiceWireCore struct {
 	Secrets     map[string]string `toml:"secrets,omitempty"`
 	SecretsFile string            `toml:"secrets_file,omitempty"`
 
-	NotifyOnFailure []string `toml:"notify_on_failure,omitempty"`
-	NotifyOnSuccess []string `toml:"notify_on_success,omitempty"`
+	// Notify lists the notifier IDs to page when this unit's `failures` policy
+	// classifies a run as a failure. Each entry is a notifier id, optionally with
+	// an inline target override ("slack:#ops"). Non-failure outcomes (a success
+	// ping, a timeout-only escalation) are routed with an explicit [[route]].
+	Notify []string `toml:"notify,omitempty"`
 	// Failures declares which outcomes count as a failure for this task: a list of
 	// EndReason names and/or exit-code tokens ("42", "1-23"). nil means "unset"
 	// (inherit [defaults], then the built-in default) — distinct from an explicit
@@ -405,13 +408,15 @@ type taskWire struct {
 	MaxCatchUpRuns int                   `toml:"max_catch_up_runs,omitempty"`
 	RunOnStart     bool                  `toml:"run_on_start,omitempty"`
 
-	Restart       model.RestartPolicy `toml:"restart,omitempty"`
-	MaxConcurrent int                 `toml:"max_concurrent,omitempty"`
-	MaxQueued     int                 `toml:"max_queued,omitempty"`
+	MaxConcurrent int `toml:"max_concurrent,omitempty"`
+	MaxQueued     int `toml:"max_queued,omitempty"`
 
-	// RestartAttempts is a pointer so an explicit `restart_attempts = 0` (give
-	// up on the very first failure) is distinguishable from an omitted key.
-	RestartAttempts *int `toml:"restart_attempts,omitempty"`
+	// Restart and RestartAttempts are rejected on [tasks.*] (services-only:
+	// restart is ongoing supervision, a task re-runs via retry_*). They decode
+	// here only so collectTaskNames can reject them with a pointed message
+	// instead of an opaque undecoded-key error.
+	Restart         model.RestartPolicy `toml:"restart,omitempty"`
+	RestartAttempts *int                `toml:"restart_attempts,omitempty"`
 
 	// Instances is rejected on [tasks.*]; carried as a pointer so the validator
 	// can distinguish "unset" from "explicitly zero".
@@ -446,8 +451,6 @@ func (w *taskWire) toTask(name string) (model.Task, error) {
 	task.CatchUp = w.CatchUp
 	task.MaxCatchUpRuns = w.MaxCatchUpRuns
 	task.RunOnStart = w.RunOnStart
-	task.Restart = w.Restart
-	task.RestartAttempts = w.RestartAttempts
 	task.MaxConcurrent = w.MaxConcurrent
 	task.MaxQueued = w.MaxQueued
 	task.RetryAttempts = w.RetryAttempts
@@ -758,7 +761,7 @@ type routeWire struct {
 }
 
 type routeMatchWire struct {
-	Kinds    []string `toml:"kinds,omitempty"`
-	Severity string   `toml:"severity,omitempty"`
-	Task     string   `toml:"task,omitempty"`
+	Kinds   []string `toml:"kinds,omitempty"`
+	Failure bool     `toml:"failure,omitempty"`
+	Task    string   `toml:"task,omitempty"`
 }
