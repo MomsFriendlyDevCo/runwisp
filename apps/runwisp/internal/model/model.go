@@ -62,7 +62,7 @@ type Task struct {
 	Description string   `toml:"description,omitempty" json:"description,omitempty"`
 
 	Cron     string `toml:"cron,omitempty"               json:"cron,omitempty"`
-	Timezone string `toml:"timezone,omitempty"           json:"timezone,omitempty" doc:"IANA timezone for cron evaluation; falls back to scheduler.timezone, then the daemon's resolved system timezone"`
+	Timezone string `toml:"timezone,omitempty"           json:"timezone,omitempty" doc:"IANA timezone for cron evaluation; falls back to daemon.timezone, then the daemon's resolved system timezone"`
 	// Jitter caps how far a cron task's start may slip so tasks sharing a fire
 	// time take turns instead of all stampeding the machine at once. Jittered
 	// runs pass through a daemon-wide work-conserving gate that targets one run
@@ -161,7 +161,7 @@ type Task struct {
 	// Secrets holds [tasks.*.secrets] plus secrets_file-derived pairs. Hidden
 	// from JSON/TOML so values never leak to API/UI/cloud serialization.
 	Secrets     map[string]string `toml:"-" json:"-"`
-	SecretsFile string            `toml:"secrets_file,omitempty" json:"secretsFile,omitempty" doc:"Path to a dotenv file whose KEY=VALUE pairs are injected into the task's process env. The path is visible in the API/UI; keys and values never leave the daemon."`
+	SecretsFile string            `toml:"secrets_file,omitempty" json:"secretsFile,omitempty" doc:"Path to a dotenv file whose KEY=VALUE pairs are injected into the task's process env. The path is visible in the API/UI; keys and values are not."`
 
 	// Parameters declares per-execution inputs an operator may supply at manual
 	// trigger time (env vars, positional args, options, flags). Scheduled
@@ -525,7 +525,7 @@ const (
 // DaemonInfo holds static identity/config data exposed via /api/daemon.
 //
 // ResolvedTimezone is the IANA zone the scheduler is actually using; it equals
-// either the operator's explicit [scheduler] timezone or — when omitted — the
+// either the operator's explicit [daemon] timezone or — when omitted — the
 // system zone the daemon detected at boot. TimezoneSource ("config" or
 // "system") tells the UI which path produced the value, so the Web UI header
 // can label the chip without re-implementing the resolver.

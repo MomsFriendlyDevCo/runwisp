@@ -381,28 +381,19 @@ func buildConfig(raw *tomlConfig) (*Config, error) {
 		Storage:              storage,
 		Daemon:               daemon,
 		Notify:               notifyCfg,
-		Scheduler:            Scheduler{Timezone: raw.Scheduler.Timezone},
+		Scheduler:            Scheduler{Timezone: raw.Daemon.Timezone},
 		pendingComposeBlocks: raw.Compose,
 	}, nil
 }
 
+// collectTaskNames validates every [tasks.*] name. A task/service key valid
+// only on the other kind never reaches here: it fails strict decode first,
+// with a pointed message from crossKindKeyHints (see suggest.go).
 func collectTaskNames(raw *tomlConfig) ([]string, error) {
 	names := make([]string, 0, len(raw.Tasks))
-	for name, w := range raw.Tasks {
+	for name := range raw.Tasks {
 		if err := model.ValidateTaskName(name); err != nil {
 			return nil, err
-		}
-		if w.Restart != "" {
-			return nil, fmt.Errorf("task %q sets restart; restart is only valid on [services.*] — to re-run a failed task use retry_attempts/retry_delay/retry_backoff", name)
-		}
-		if w.RestartAttempts != nil {
-			return nil, fmt.Errorf("task %q sets restart_attempts; restart_attempts is only valid on [services.*] — bound task re-runs with retry_attempts", name)
-		}
-		if w.Instances != nil {
-			return nil, fmt.Errorf("task %q sets instances; instances is only valid on [services.*]", name)
-		}
-		if len(w.DependsOn) > 0 {
-			return nil, fmt.Errorf("task %q sets depends_on; depends_on is only valid on [services.*]", name)
 		}
 		names = append(names, name)
 	}
@@ -412,15 +403,12 @@ func collectTaskNames(raw *tomlConfig) ([]string, error) {
 
 func collectServiceNames(raw *tomlConfig) ([]string, error) {
 	names := make([]string, 0, len(raw.Services))
-	for name, w := range raw.Services {
+	for name := range raw.Services {
 		if err := model.ValidateTaskName(name); err != nil {
 			return nil, err
 		}
 		if _, dup := raw.Tasks[name]; dup {
 			return nil, fmt.Errorf("name %q used by both [tasks.*] and [services.*]", name)
-		}
-		if w.OnOverlap != "" {
-			return nil, fmt.Errorf("service %q sets on_overlap; on_overlap is only valid on [tasks.*] — a service never runs a second overlapping instance, instances controls parallelism", name)
 		}
 		names = append(names, name)
 	}
@@ -496,6 +484,14 @@ func validateTLS(d *Daemon) error {
 	case d.TLSCert == "" || d.TLSKey == "":
 		return fmt.Errorf("invalid [daemon]: tls_cert and tls_key must be set together")
 	}
+	// tls = "off" explicitly disables TLS; a cert/key pair explicitly enables
+	// it. Both set at once is a contradiction the operator needs to resolve,
+	// not a silent "cert wins" fallback (an unset tls alongside a cert/key
+	// pair is fine, and stays ApplyDefaults'd to "" rather than "off"; see
+	// there).
+	if d.TLS == TLSModeOff {
+		return fmt.Errorf("invalid [daemon]: tls = \"off\" cannot be combined with tls_cert/tls_key; remove tls_cert and tls_key, or set tls to \"auto\" or leave it unset")
+	}
 	if _, err := tls.LoadX509KeyPair(d.TLSCert, d.TLSKey); err != nil {
 		return fmt.Errorf("invalid [daemon] tls_cert/tls_key: %w", err)
 	}
@@ -521,7 +517,7 @@ func Validate(cfg *Config) error {
 	if err := validateTLS(&cfg.Daemon); err != nil {
 		errs = append(errs, err)
 	}
-	if _, err := ResolveTimezone("scheduler.timezone", cfg.Scheduler.Timezone); err != nil {
+	if _, err := ResolveTimezone("daemon.timezone", cfg.Scheduler.Timezone); err != nil {
 		errs = append(errs, err)
 	}
 
@@ -1355,7 +1351,7 @@ func OrDefault[T any](p *T, fallback T) T {
 
 // ApplyDefaults fills in zero-valued fields with sensible defaults. The
 // scheduler timezone, in particular, falls back to the host's system zone
-// when the operator left [scheduler] timezone unset — so a fresh install
+// when the operator left [daemon] timezone unset — so a fresh install
 // just works without an explicit choice, while the resolved zone is still
 // surfaced in the TUI banner and Web UI header.
 func ApplyDefaults(cfg *Config) {
@@ -1369,7 +1365,11 @@ func ApplyDefaults(cfg *Config) {
 	if cfg.Daemon.ShutdownTimeout == 0 {
 		cfg.Daemon.ShutdownTimeout = DefaultDaemonShutdown
 	}
-	if cfg.Daemon.TLS == "" {
+	// An unset tls defaults to "off", unless the operator already supplied a
+	// cert/key pair: leave it as "" there so validateTLS can still tell "never
+	// wrote tls" apart from an explicit tls = "off", which contradicts the
+	// cert override and is rejected.
+	if cfg.Daemon.TLS == "" && (cfg.Daemon.TLSCert == "" || cfg.Daemon.TLSKey == "") {
 		cfg.Daemon.TLS = TLSModeOff
 	}
 	if cfg.Defaults.HealthyAfter == nil {

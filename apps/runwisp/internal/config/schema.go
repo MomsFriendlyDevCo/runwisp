@@ -123,7 +123,7 @@ func (c *Config) OriginFile(name string) string {
 
 // Scheduler holds scheduler-wide settings. Timezone is the IANA name used to
 // evaluate cron expressions for any task that doesn't pin its own. When the
-// operator omits [scheduler] timezone, ApplyDefaults fills it in from the
+// operator omits [daemon] timezone, ApplyDefaults fills it in from the
 // host's system timezone (Source = "system"); when the operator sets it
 // explicitly, Source = "config".
 type Scheduler struct {
@@ -159,8 +159,8 @@ type NotifyConfig struct {
 	// outbound coalescing) is distinguishable from an omitted key (nil, default 1h
 	// window). The in-app coalescer always applies a window regardless, treating
 	// nil/zero as its built-in default.
-	CoalesceWindow  *time.Duration
-	KeepOccurrences int
+	CoalesceWindow *time.Duration
+	CoalesceLimit  int
 }
 
 // NotifierSpec is one [notifiers.<id>] block, post-decode. Secret-bearing fields

@@ -195,6 +195,12 @@ type composeServiceOverrideWire struct {
 	unitOverrideWire
 	serviceSupervisionWire
 
+	// OnOverlap decodes here (rather than being left undecoded) purely so
+	// applyComposeOverride can reject it with a pointed message instead of an
+	// opaque undecoded-key error: a compose-imported service is always
+	// model.KindService, and on_overlap is a task-only concept.
+	OnOverlap model.ConcurrencyPolicy `toml:"on_overlap,omitempty"`
+
 	Instances int `toml:"instances,omitempty"`
 
 	// Failures overrides the failure classification for this compose service,

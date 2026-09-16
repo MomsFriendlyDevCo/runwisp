@@ -126,10 +126,14 @@ docker run --rm --init \\
 ```
 
 `-e NAME` with no `=value` tells Docker "take this one from my
-environment" — so the value goes daemon → task → container without ever
-appearing in your config, your run log, or `ps`. Values under `secrets`
-never leave the daemon; the Web UI shows the file path, not the
-contents.
+environment," so the value never appears on the command line, in `ps`,
+or in `runwisp.toml`. The config API and web UI never show `secrets`
+values either, only the `secrets_file` path does. It's still part of
+the process environment though: if the container prints its env or
+crashes and dumps it, the daemon scrubs the known secret value out of
+the captured output first (swapping it for `[redacted]`) before it hits
+the run log or the API. That's a literal-value match, so a secret the
+container base64s or reshapes before printing can still slip through.
 
 ### About that timeout
 

@@ -701,6 +701,8 @@ export interface components {
              * @description Number of rows the operation touched
              */
             affected: number;
+            /** @description Run IDs left untouched because they are still active (delete only) */
+            skipped?: string[] | null;
         };
         BulkRerunBody: {
             /**
@@ -1484,7 +1486,7 @@ export interface components {
             retryDelay?: number;
             /** @description For tasks: fire once at daemon startup, in addition to any cron schedule */
             runOnStart: boolean;
-            /** @description Path to a dotenv file whose KEY=VALUE pairs are injected into the task's process env. The path is visible in the API/UI; keys and values never leave the daemon. */
+            /** @description Path to a dotenv file whose KEY=VALUE pairs are injected into the task's process env. The path is visible in the API/UI; keys and values are not. */
             secretsFile?: string;
             /** @description Absolute path to the shell interpreter for run scripts; defaults to /bin/sh */
             shell?: string;
@@ -1505,7 +1507,7 @@ export interface components {
              * @description Per-run timeout in nanoseconds
              */
             timeout?: number;
-            /** @description IANA timezone for cron evaluation; falls back to scheduler.timezone, then the daemon's resolved system timezone */
+            /** @description IANA timezone for cron evaluation; falls back to daemon.timezone, then the daemon's resolved system timezone */
             timezone?: string;
             /** @description Octal file-creation mask applied to the run's process; empty inherits the daemon's umask */
             umask?: string;
@@ -1682,7 +1684,7 @@ export interface components {
             retryDelay?: number;
             /** @description For tasks: fire once at daemon startup, in addition to any cron schedule */
             runOnStart: boolean;
-            /** @description Path to a dotenv file whose KEY=VALUE pairs are injected into the task's process env. The path is visible in the API/UI; keys and values never leave the daemon. */
+            /** @description Path to a dotenv file whose KEY=VALUE pairs are injected into the task's process env. The path is visible in the API/UI; keys and values are not. */
             secretsFile?: string;
             /** @description Absolute path to the shell interpreter for run scripts; defaults to /bin/sh */
             shell?: string;
@@ -1703,7 +1705,7 @@ export interface components {
              * @description Per-run timeout in nanoseconds
              */
             timeout?: number;
-            /** @description IANA timezone for cron evaluation; falls back to scheduler.timezone, then the daemon's resolved system timezone */
+            /** @description IANA timezone for cron evaluation; falls back to daemon.timezone, then the daemon's resolved system timezone */
             timezone?: string;
             /** @description Octal file-creation mask applied to the run's process; empty inherits the daemon's umask */
             umask?: string;

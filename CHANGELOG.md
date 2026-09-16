@@ -31,14 +31,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`[[route]]` `match.kinds` now speaks the same outcome vocabulary as `failures`** (`failed`, `timeout`, `crashed`, `log_overflow`, `stopped`, `missed`, … plus `service.fatal`, `log.disk_pressure`) instead of the `run.*` stream names, added a first-class `match.failure = true` that matches any run classified as a failure, and dropped the derived `match.severity` axis. See [Notification rules](https://docs.runwisp.com/notifications/routes/).
 - **Run history now distinguishes `ui` (Web UI / TUI "Run Now") and `cli` (`runwisp run`) from a raw `api` REST call**, instead of tagging all three the same way.
 - **`on_overlap` is now rejected on `[services.*]`** (and compose per-service overrides): it was a silent no-op there, since a service's concurrency is `instances`, not overlap.
+- **`[scheduler] timezone` moved to `[daemon] timezone`.** The single-key `[scheduler]` table is gone; a config that still has one fails to load with a hint pointing at `[daemon]`.
+- **Every task/service-only key now rejects with a pointer to the right section** (e.g. `restart` under `[tasks.*]`, `cron` under `[services.*]`), not just the handful that already did.
 - **`[services.*]` can now set `restart`** (`never` / `on_failure` / `always`, default `always`), matching what a compose-imported service's per-service override already allowed.
 - **Every duration field (`timeout`, `retry_delay`, `graceful_stop`, `jitter`, etc.) now accepts `d` (days) and `w` (weeks)**, not just `keep_for` — matching what the schema already advertised.
 - **`GET /api/daemon`'s `tasks` list now returns the same full task shape as `GET /api/tasks`** (description, timeout, retry/restart settings, and more), instead of a separately-trimmed subset.
 - **`GET /api/runs` gained an `isFailure` query parameter**, matching the `isFailure` field already accepted in bulk-operation request bodies.
+- **`POST /api/runs/bulk/delete` now reports the runs it skipped for being active** in a `skipped` list, instead of silently dropping them from the `affected` count; deleting a single active run still returns a `409`.
 - **The auth endpoints (`/api/auth/status`, `/api/auth/challenge`, `/api/auth/login`, `/api/auth/launch-ticket`) are now documented in the OpenAPI spec** (`runwisp openapi`), so API clients get generated request/response types instead of guessing the shape.
 - **`GET /api/notifications/stream` has been removed.** Notification events already ride the unified `GET /api/events/stream`.
 - **`catch_up` is now an integer and `max_catch_up_runs` is gone.** The value is how many missed cron ticks to re-fire on startup: `0` (was `"skip"`), `1` (was `"latest"`, the default), or `N` to replay up to `N` (replacing `"all"` + its separate cap). Anything above `1` still requires `on_overlap = "queue"`. See [Missed ticks](https://docs.runwisp.com/concepts/scheduling/#missed-ticks-catchup).
 - **`notify.coalesce_outbound` is gone; `coalesce_window = "0s"` now disables outbound coalescing** (one message per event). The bell still coalesces on its default window.
+- **`[notify] keep_occurrences` is renamed to `coalesce_limit`.** It also controls how often a suppressed event is force-forwarded to outbound channels, which is now documented.
 - **`graceful_stop = "0s"` and `retry_delay = "0s"` are now honored literally** instead of silently falling back to the defaults — so `graceful_stop = "0s"` means kill immediately and `retry_delay = "0s"` means retry with no delay.
 - **`stop_signal` now takes only the canonical `SIGxxx` spelling**; bare names like `TERM` are rejected. Use `SIGTERM`, `SIGINT`, etc.
 - **Setting `[daemon] metrics_listen` now enables metrics on its own** — you no longer also need `metrics_enabled = true`.
@@ -53,6 +57,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **An ad-hoc dispatch request can no longer trigger a `[services.*]` entry**, which could have reserved it an extra instance outside its restart policy — it only checked `manual_trigger` (always true internally for services), the same gate the REST/UI/CLI trigger paths already close with a service-kind check.
 - **A remote `service:remove` request could delete a TOML-defined `[services.*]` entry**, desyncing the running task set from `runwisp.toml` with no way back short of a daemon restart. It now only removes services that were remotely declared in the first place.
 - **`runwisp run --standalone` now honors `manual_trigger = false` and refuses to run a `[services.*]` entry**, matching the guard the daemon already enforces.
+- **`tls = "off"` is now rejected when `tls_cert`/`tls_key` are also set**, instead of being silently overridden into HTTPS.
+
+### Security
+
+- **Secret values (`secrets` / `secrets_file`) are now redacted from a run's captured output** before it's persisted, streamed over the API, or pushed to the control plane, swapping the literal value for `[redacted]`. Best-effort: a secret the process transforms or splits across lines before printing can still slip through.
 
 ## [0.16.4] - 2026-09-09
 
