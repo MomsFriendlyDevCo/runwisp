@@ -741,6 +741,26 @@ func TestSystemdEnsurePasswordDropIn_WritesOnceThenSkips(t *testing.T) {
 	assert.Zero(t, cmd.Remaining(), "skip path must not daemon-reload")
 }
 
+// TestSystemdEnsurePasswordDropIn_EscapesPercentSpecifier proves that a
+// password containing a systemd '%' specifier can't break out of its
+// Environment="..." line — the same escaping envDropInContent already
+// applies to every other RUNWISP_* value via systemdEscape.
+func TestSystemdEnsurePasswordDropIn_EscapesPercentSpecifier(t *testing.T) {
+	inst, fs, cmd, _, binary := newFakeInstaller(t, false)
+	opts := defaultInstallOpts(binary)
+	opts.System = true
+
+	cmd.Expect("sudo", []string{"systemctl", "daemon-reload"}, nil, nil, nil)
+	path, wrote, err := inst.EnsurePasswordDropIn(context.Background(), opts, "%h%%pw")
+	require.NoError(t, err)
+	assert.True(t, wrote)
+
+	body, err := fs.ReadFile(path)
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `Environment="RUNWISP_PASSWORD=%%h%%%%pw"`,
+		"systemd '%' specifiers must be doubled like systemdEscape does for every other value")
+}
+
 // TestSystemdWriteEnvDropIn_WritesRefreshesAndRemoves is the #251 regression at
 // the installer layer: unlike EnsurePasswordDropIn, the env drop-in must
 // refresh on every install so a changed or removed RUNWISP_* value actually
@@ -754,10 +774,10 @@ func TestSystemdWriteEnvDropIn_WritesRefreshesAndRemoves(t *testing.T) {
 	// First write: sorted Environment lines, 0600 (this drop-in can carry a
 	// secret like RUNWISP_PASSWORD), daemon-reload fired.
 	cmd.Expect("sudo", []string{"systemctl", "daemon-reload"}, nil, nil, nil)
-	got, changed, err := inst.WriteEnvDropIn(context.Background(), opts, EnvDropInName,
+	got, change, err := inst.WriteEnvDropIn(context.Background(), opts, EnvDropInName,
 		map[string]string{"RUNWISP_LOG_LEVEL": "debug", "RUNWISP_AUTH": "off"})
 	require.NoError(t, err)
-	assert.True(t, changed)
+	assert.Equal(t, DropInWritten, change)
 	assert.Equal(t, path, got)
 
 	info, err := fakeFS.Stat(path)
@@ -772,19 +792,19 @@ func TestSystemdWriteEnvDropIn_WritesRefreshesAndRemoves(t *testing.T) {
 
 	// Re-running with identical vars is a no-op: no write, no daemon-reload —
 	// so a caller knows no restart is needed either.
-	_, changed, err = inst.WriteEnvDropIn(context.Background(), opts, EnvDropInName,
+	_, change, err = inst.WriteEnvDropIn(context.Background(), opts, EnvDropInName,
 		map[string]string{"RUNWISP_LOG_LEVEL": "debug", "RUNWISP_AUTH": "off"})
 	require.NoError(t, err)
-	assert.False(t, changed, "identical content must not rewrite or reload")
+	assert.Equal(t, DropInUnchanged, change, "identical content must not rewrite or reload")
 	assert.Zero(t, cmd.Remaining())
 
 	// A changed value refreshes the file (unlike the password drop-in, which
 	// never rotates) and reloads again.
 	cmd.Expect("sudo", []string{"systemctl", "daemon-reload"}, nil, nil, nil)
-	_, changed, err = inst.WriteEnvDropIn(context.Background(), opts, EnvDropInName,
+	_, change, err = inst.WriteEnvDropIn(context.Background(), opts, EnvDropInName,
 		map[string]string{"RUNWISP_AUTH": "on"})
 	require.NoError(t, err)
-	assert.True(t, changed)
+	assert.Equal(t, DropInWritten, change)
 	body2, err := fakeFS.ReadFile(path)
 	require.NoError(t, err)
 	assert.Contains(t, string(body2), `Environment="RUNWISP_AUTH=on"`)
@@ -793,17 +813,17 @@ func TestSystemdWriteEnvDropIn_WritesRefreshesAndRemoves(t *testing.T) {
 
 	// Empty vars removes the file and reloads.
 	cmd.Expect("sudo", []string{"systemctl", "daemon-reload"}, nil, nil, nil)
-	_, changed, err = inst.WriteEnvDropIn(context.Background(), opts, EnvDropInName, nil)
+	_, change, err = inst.WriteEnvDropIn(context.Background(), opts, EnvDropInName, nil)
 	require.NoError(t, err)
-	assert.True(t, changed)
+	assert.Equal(t, DropInRemoved, change)
 	_, err = fakeFS.Stat(path)
 	assert.ErrorIs(t, err, fs.ErrNotExist)
 	assert.Zero(t, cmd.Remaining())
 
 	// Empty vars with nothing on disk is a true no-op — no remove attempt, no reload.
-	_, changed, err = inst.WriteEnvDropIn(context.Background(), opts, EnvDropInName, nil)
+	_, change, err = inst.WriteEnvDropIn(context.Background(), opts, EnvDropInName, nil)
 	require.NoError(t, err)
-	assert.False(t, changed)
+	assert.Equal(t, DropInUnchanged, change)
 	assert.Zero(t, cmd.Remaining())
 }
 
